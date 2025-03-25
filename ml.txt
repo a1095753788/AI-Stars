@@ -1,1 +1,2 @@
-cd  C:\Users\alune\Documents\AI Stars
+cd /path/to/my-project C:\Users\alune\Documents\AI Stars
+git remote add origin https://github.com/a1095753788/AI-Stars.git
