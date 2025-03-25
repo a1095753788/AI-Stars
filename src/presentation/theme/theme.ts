@@ -1,57 +1,14 @@
-import { Theme, ThemeMode } from '../../types/theme';
+import { ThemeMode } from '../../types/theme';
+import { SimpleTheme, lightTheme as simpleLightTheme, darkTheme as simpleDarkTheme } from './ThemeContext';
 
-export const lightTheme: Theme = {
-  colors: {
-    primary: '#007AFF',
-    background: '#F5F5F5',
-    card: '#FFFFFF',
-    text: '#000000',
-    border: '#E0E0E0',
-    notification: '#FF3B30',
-    userBubble: '#007AFF',
-    assistantBubble: '#F0F0F0',
-    userText: '#FFFFFF',
-    assistantText: '#000000',
-  },
-  spacing: {
-    small: 8,
-    medium: 16,
-    large: 24,
-  },
-  fontSize: {
-    small: 12,
-    medium: 16,
-    large: 20,
-    xlarge: 24,
-  },
-};
+// 导出SimpleTheme替代旧的Theme类型
+export type { SimpleTheme };
 
-export const darkTheme: Theme = {
-  colors: {
-    primary: '#0A84FF',
-    background: '#121212',
-    card: '#1E1E1E',
-    text: '#FFFFFF',
-    border: '#2C2C2C',
-    notification: '#FF453A',
-    userBubble: '#0A84FF',
-    assistantBubble: '#2C2C2C',
-    userText: '#FFFFFF',
-    assistantText: '#FFFFFF',
-  },
-  spacing: {
-    small: 8,
-    medium: 16,
-    large: 24,
-  },
-  fontSize: {
-    small: 12,
-    medium: 16,
-    large: 20,
-    xlarge: 24,
-  },
-};
+// 直接导出ThemeContext中定义的主题
+export const lightTheme: SimpleTheme = simpleLightTheme;
+export const darkTheme: SimpleTheme = simpleDarkTheme;
 
-export const getTheme = (mode: ThemeMode): Theme => {
+// 获取主题方法
+export const getTheme = (mode: ThemeMode): SimpleTheme => {
   return mode === 'light' ? lightTheme : darkTheme;
 }; 

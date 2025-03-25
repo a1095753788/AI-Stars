@@ -11,12 +11,15 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  SafeAreaView
+  SafeAreaView,
+  ActivityIndicator,
+  StatusBar
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
-import { getApiConfigs, saveApiConfig, deleteApiConfig } from '../../utils/storageService';
-import { ApiConfig } from '../../types/api';
-import { validateApiConfig } from '../../services/apiService';
+import { getApiConfigs, saveApiConfig, deleteApiConfig, saveActiveApiConfig } from '../../utils/storageService';
+import { ApiProvider, getApiProviders, getDefaultEndpoint, checkApiConfigValidity } from '../../services/api';
+import { ApiConfig } from '../../types/state';
+import { useTranslation } from '../../i18n';
 
 /**
  * API配置界面
@@ -24,30 +27,54 @@ import { validateApiConfig } from '../../services/apiService';
  */
 const ApiConfigScreen = ({ navigation }: any) => {
   const { theme } = useTheme();
-  const [configs, setConfigs] = useState<ApiConfig[]>([]);
+  const { t } = useTranslation();
+  const [apiConfigs, setApiConfigs] = useState<ApiConfig[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // 编辑模式状态
-  const [editMode, setEditMode] = useState(false);
-  const [currentConfig, setCurrentConfig] = useState<ApiConfig | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // 安全获取翻译文本，避免对象错误
+  const safeTranslate = (key: string, fallback: string): string => {
+    const result = t(key);
+    return typeof result === 'string' ? result : fallback;
+  };
   
   // 表单状态
-  const [name, setName] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [endpoint, setEndpoint] = useState('');
-  const [model, setModel] = useState('');
-  const [isActive, setIsActive] = useState(false);
-
-  // 加载API配置
+  const [configName, setConfigName] = useState('');
+  const [configProvider, setConfigProvider] = useState<ApiProvider>('openai');
+  const [configApiKey, setConfigApiKey] = useState('');
+  const [configEndpoint, setConfigEndpoint] = useState('');
+  const [configModel, setConfigModel] = useState('');
+  const [configIsActive, setConfigIsActive] = useState(false);
+  
+  // API提供商列表
+  const apiProviders = getApiProviders();
+  
+  // 显示提供商选择器
+  const [showProviderSelector, setShowProviderSelector] = useState(false);
+  
+  // 加载配置
   useEffect(() => {
     loadConfigs();
   }, []);
-
+  
+  // 当提供商变化时，更新默认端点
+  useEffect(() => {
+    if (!isEditing || editingId === null) {
+      setConfigEndpoint(getDefaultEndpoint(configProvider));
+    }
+  }, [configProvider, isEditing, editingId]);
+  
+  // 加载API配置
   const loadConfigs = async () => {
     try {
       setLoading(true);
-      const apiConfigs = await getApiConfigs();
-      setConfigs(apiConfigs);
+      const configs = await getApiConfigs();
+      if (configs && configs.length > 0) {
+        setApiConfigs(configs);
+      } else {
+        setApiConfigs([]);
+      }
     } catch (error) {
       console.error('加载API配置失败:', error);
       Alert.alert('错误', '加载API配置失败');
@@ -55,79 +82,106 @@ const ApiConfigScreen = ({ navigation }: any) => {
       setLoading(false);
     }
   };
-
+  
   // 重置表单
   const resetForm = () => {
-    setName('');
-    setApiKey('');
-    setEndpoint('');
-    setModel('');
-    setIsActive(false);
-    setCurrentConfig(null);
-    setEditMode(false);
+    setConfigName('');
+    setConfigProvider('openai');
+    setConfigApiKey('');
+    setConfigEndpoint(getDefaultEndpoint('openai'));
+    setConfigModel('');
+    setConfigIsActive(false);
+    setIsEditing(false);
+    setEditingId(null);
   };
-
+  
   // 设置表单为编辑模式
   const setFormForEdit = (config: ApiConfig) => {
-    setName(config.name);
-    setApiKey(config.apiKey);
-    setEndpoint(config.endpoint);
-    setModel(config.model);
-    setIsActive(config.isActive);
-    setCurrentConfig(config);
-    setEditMode(true);
+    setConfigName(config.name);
+    setConfigProvider(config.provider || 'openai');
+    setConfigApiKey(config.apiKey);
+    setConfigEndpoint(config.endpoint);
+    setConfigModel(config.model);
+    setConfigIsActive(config.isActive);
+    setIsEditing(true);
+    setEditingId(config.id);
   };
-
-  // 保存API配置
+  
+  // 保存配置
   const saveConfig = async () => {
-    // 简单验证
-    if (!name.trim()) {
-      Alert.alert('错误', '请输入配置名称');
-      return;
-    }
-
-    if (!apiKey.trim()) {
-      Alert.alert('错误', '请输入API密钥');
-      return;
-    }
-
-    if (!endpoint.trim()) {
-      Alert.alert('错误', '请输入API端点');
-      return;
-    }
-
-    if (!model.trim()) {
-      Alert.alert('错误', '请输入模型名称');
-      return;
-    }
-
     try {
-      setLoading(true);
-
-      // 验证API配置
-      const isValid = await validateApiConfig(apiKey, endpoint);
-      if (!isValid) {
-        Alert.alert('验证失败', '无法验证API配置，请检查API密钥和端点是否正确');
-        setLoading(false);
+      // 验证表单
+      if (!configName.trim()) {
+        Alert.alert('错误', '请输入配置名称');
         return;
       }
-
-      const newConfig: ApiConfig = {
-        id: currentConfig?.id || Date.now().toString(),
-        name,
-        apiKey,
-        endpoint,
-        model,
-        isActive,
-        createdAt: currentConfig?.createdAt || Date.now(),
-        updatedAt: Date.now()
-      };
-
-      await saveApiConfig(newConfig);
-      resetForm();
+      
+      if (!configApiKey.trim()) {
+        Alert.alert('错误', '请输入API密钥');
+        return;
+      }
+      
+      if (!configEndpoint.trim()) {
+        Alert.alert('错误', '请输入API端点');
+        return;
+      }
+      
+      if (!configModel.trim()) {
+        Alert.alert('错误', '请输入模型名称');
+        return;
+      }
+      
+      setLoading(true);
+      
+      if (isEditing && editingId) {
+        // 更新配置
+        const updatedConfig: ApiConfig = {
+          id: editingId,
+          name: configName,
+          provider: configProvider,
+          apiKey: configApiKey,
+          endpoint: configEndpoint,
+          model: configModel,
+          isActive: configIsActive,
+          createdAt: apiConfigs.find(c => c.id === editingId)?.createdAt || Date.now(),
+          updatedAt: Date.now()
+        };
+        
+        await saveApiConfig(updatedConfig);
+        
+        // 如果设为活跃，更新其他配置
+        if (configIsActive) {
+          await saveActiveApiConfig(editingId);
+        }
+      } else {
+        // 添加配置
+        const newConfig: ApiConfig = {
+          id: Date.now().toString(),
+          name: configName,
+          provider: configProvider,
+          apiKey: configApiKey,
+          endpoint: configEndpoint,
+          model: configModel,
+          isActive: configIsActive,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+        
+        await saveApiConfig(newConfig);
+        
+        // 如果设为活跃，更新其他配置
+        if (configIsActive) {
+          await saveActiveApiConfig(newConfig.id);
+        }
+      }
+      
+      // 重新加载配置
       await loadConfigs();
-
-      Alert.alert('成功', editMode ? '已更新API配置' : '已添加新的API配置');
+      
+      // 重置表单
+      resetForm();
+      
+      Alert.alert('成功', isEditing ? '配置已更新' : '配置已添加');
     } catch (error) {
       console.error('保存API配置失败:', error);
       Alert.alert('错误', '保存API配置失败');
@@ -135,12 +189,12 @@ const ApiConfigScreen = ({ navigation }: any) => {
       setLoading(false);
     }
   };
-
-  // 删除API配置
+  
+  // 确认删除配置
   const confirmDeleteConfig = (config: ApiConfig) => {
     Alert.alert(
       '确认删除',
-      `确定要删除 "${config.name}" API配置吗？`,
+      `确定要删除API配置 "${config.name}" 吗？此操作无法撤销。`,
       [
         { text: '取消', style: 'cancel' },
         { 
@@ -150,12 +204,6 @@ const ApiConfigScreen = ({ navigation }: any) => {
             try {
               setLoading(true);
               await deleteApiConfig(config.id);
-              
-              // 如果正在编辑此配置，重置表单
-              if (currentConfig?.id === config.id) {
-                resetForm();
-              }
-              
               await loadConfigs();
               Alert.alert('成功', '已删除API配置');
             } catch (error) {
@@ -165,219 +213,429 @@ const ApiConfigScreen = ({ navigation }: any) => {
               setLoading(false);
             }
           } 
-        },
+        }
       ]
     );
   };
-
-  // 渲染配置项
+  
+  // 设置为活跃配置
+  const setActiveConfig = async (configId: string) => {
+    try {
+      setLoading(true);
+      await saveActiveApiConfig(configId);
+      await loadConfigs();
+    } catch (error) {
+      console.error('设置活跃配置失败:', error);
+      Alert.alert('错误', '设置活跃配置失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 渲染API配置项
   const renderConfigItem = ({ item }: { item: ApiConfig }) => {
+    // 获取提供商名称
+    const providerLabel = apiProviders.find(p => p.value === (item.provider || 'openai'))?.label || 'OpenAI';
+    
     return (
       <View style={[styles.configItem, { backgroundColor: theme.colors.card }]}>
-        <View style={styles.configInfo}>
-          <Text style={[styles.configName, { color: theme.colors.text }]}>
-            {item.name} {item.isActive && '(活跃)'}
+        <TouchableOpacity
+          style={styles.configItemContent}
+          onPress={() => setFormForEdit(item)}
+          onLongPress={() => confirmDeleteConfig(item)}
+        >
+          <View style={styles.configHeader}>
+            <Text style={[styles.configName, { color: theme.colors.text }]}>
+              {item.name}
+            </Text>
+            {item.isActive && (
+              <View style={[styles.activeTag, { backgroundColor: theme.colors.primary }]}>
+                <Text style={styles.activeTagText}>活跃</Text>
+              </View>
+            )}
+          </View>
+          
+          <Text style={[styles.configProvider, { color: theme.colors.text + '99' }]}>
+            提供商: {providerLabel}
           </Text>
+          
           <Text style={[styles.configModel, { color: theme.colors.text + '99' }]}>
-            {item.model}
+            模型: {item.model}
           </Text>
-          <Text style={[styles.configEndpoint, { color: theme.colors.text + '80' }]} numberOfLines={1}>
-            {item.endpoint}
+          
+          <Text style={[styles.configApiKey, { color: theme.colors.text + '99' }]}>
+            API密钥: {item.apiKey.substring(0, 3)}...{item.apiKey.substring(item.apiKey.length - 4)}
           </Text>
-        </View>
-        <View style={styles.configActions}>
-          <TouchableOpacity 
-            style={[styles.editButton, { backgroundColor: theme.colors.primary + '20' }]}
-            onPress={() => setFormForEdit(item)}
+        </TouchableOpacity>
+        
+        {!item.isActive && (
+          <TouchableOpacity
+            style={[styles.setActiveButton, { backgroundColor: theme.colors.primary + '20' }]}
+            onPress={() => setActiveConfig(item.id)}
           >
-            <Text style={[styles.buttonText, { color: theme.colors.primary }]}>编辑</Text>
+            <Text style={{ color: theme.colors.primary }}>设为活跃</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.deleteButton, { backgroundColor: '#FF3B30' + '20' }]}
-            onPress={() => confirmDeleteConfig(item)}
-          >
-            <Text style={[styles.buttonText, { color: '#FF3B30' }]}>删除</Text>
-          </TouchableOpacity>
-        </View>
+        )}
       </View>
     );
   };
-
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoidingView}
+  
+  // 渲染提供商选择项
+  const renderProviderItem = ({ item }: { item: { value: ApiProvider, label: string } }) => {
+    return (
+      <TouchableOpacity
+        style={[
+          styles.providerItem,
+          { 
+            backgroundColor: configProvider === item.value ? 
+              theme.colors.primary + '20' : 
+              'transparent',
+            borderBottomWidth: item.value !== apiProviders[apiProviders.length-1].value ? 0.5 : 0,
+            borderBottomColor: theme.colors.border + '50'
+          }
+        ]}
+        onPress={() => {
+          setConfigProvider(item.value);
+          setShowProviderSelector(false);
+        }}
       >
+        <Text style={[
+          styles.providerLabel, 
+          { 
+            color: configProvider === item.value ? 
+              theme.colors.primary : 
+              theme.colors.text 
+          }
+        ]}>
+          {item.label}
+        </Text>
+        
+        {configProvider === item.value && (
+          <Text style={{ color: theme.colors.primary }}>✓</Text>
+        )}
+      </TouchableOpacity>
+    );
+  };
+  
+  return (
+    <>
+      <StatusBar
+        barStyle={theme.isDark ? "light-content" : "dark-content"}
+        backgroundColor="transparent"
+        translucent
+      />
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={styles.statusBarSpacer} />
         {/* 头部 */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={[styles.headerButton, { color: theme.colors.primary }]}>返回</Text>
+        <View style={[styles.header, { backgroundColor: theme.colors.background }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Text style={[styles.backButtonText, { color: theme.colors.primary }]}>
+              ←
+            </Text>
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>API配置</Text>
-          <View style={{ width: 50 }} />
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+            {safeTranslate('apiConfig', 'API配置')}
+          </Text>
+          <View style={styles.headerRight} />
         </View>
-
-        <ScrollView style={styles.scrollView}>
-          {/* 现有配置列表 */}
-          {configs.length > 0 && (
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>已有配置</Text>
-              <FlatList
-                data={configs}
-                renderItem={renderConfigItem}
-                keyExtractor={(item) => item.id}
-                scrollEnabled={false}
-              />
-            </View>
-          )}
-
+        
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollViewContent}
+          showsVerticalScrollIndicator={true}
+          scrollEnabled={true}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* 配置列表 */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              已保存的API配置
+            </Text>
+            
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color={theme.colors.primary} size="small" />
+                <Text style={[styles.loadingText, { color: theme.colors.text }]}>
+                  加载中...
+                </Text>
+              </View>
+            ) : apiConfigs.length === 0 ? (
+              <View style={[styles.emptyContainer, { backgroundColor: theme.colors.card }]}>
+                <Text style={[styles.emptyText, { color: theme.colors.text + '99' }]}>
+                  暂无API配置
+                </Text>
+                <Text style={[styles.emptyDescription, { color: theme.colors.text + '70' }]}>
+                  请使用下方表单添加API配置
+                </Text>
+              </View>
+            ) : (
+              apiConfigs.map(config => (
+                <View key={config.id} style={{ marginBottom: 10 }}>
+                  {renderConfigItem({ item: config })}
+                </View>
+              ))
+            )}
+          </View>
+          
           {/* 添加/编辑表单 */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              {editMode ? '编辑配置' : '添加新配置'}
+              {isEditing ? '编辑API配置' : '添加新的API配置'}
             </Text>
             
-            <View style={[styles.formCard, { backgroundColor: theme.colors.card }]}>
-              {/* 名称 */}
-              <View style={styles.formItem}>
-                <Text style={[styles.formLabel, { color: theme.colors.text }]}>名称</Text>
+            <View style={[styles.formContainer, { backgroundColor: theme.colors.card }]}>
+              {/* 配置名称 */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>
+                  配置名称
+                </Text>
                 <TextInput
                   style={[
-                    styles.formInput,
+                    styles.input,
                     { 
-                      color: theme.colors.text,
                       backgroundColor: theme.colors.background,
-                      borderColor: theme.colors.border
+                      color: theme.colors.text
                     }
                   ]}
-                  placeholder="例如：OpenAI GPT-4"
+                  placeholder="例如: OpenAI GPT-4"
                   placeholderTextColor={theme.colors.text + '50'}
-                  value={name}
-                  onChangeText={setName}
+                  value={configName}
+                  onChangeText={setConfigName}
                 />
               </View>
               
+              {/* API提供商 */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>
+                  API提供商
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.input,
+                    styles.providerSelector,
+                    { 
+                      backgroundColor: theme.colors.background,
+                    }
+                  ]}
+                  onPress={() => {
+                    navigation.navigate('ApiProviderSelector', {
+                      currentProvider: configProvider,
+                      onSelectProvider: (provider: string, label: string) => {
+                        setConfigProvider(provider as ApiProvider);
+                        setConfigEndpoint(getDefaultEndpoint(provider as ApiProvider));
+                      }
+                    });
+                  }}
+                >
+                  <Text style={{ color: theme.colors.text }}>
+                    {apiProviders.find(p => p.value === configProvider)?.label || '选择API提供商'}
+                  </Text>
+                  <Text style={{ color: theme.colors.text }}>▼</Text>
+                </TouchableOpacity>
+              </View>
+              
               {/* API密钥 */}
-              <View style={styles.formItem}>
-                <Text style={[styles.formLabel, { color: theme.colors.text }]}>API密钥</Text>
+              <View style={styles.formGroup}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>
+                  API密钥
+                </Text>
                 <TextInput
                   style={[
-                    styles.formInput,
+                    styles.input,
                     { 
-                      color: theme.colors.text,
                       backgroundColor: theme.colors.background,
-                      borderColor: theme.colors.border
+                      color: theme.colors.text
                     }
                   ]}
                   placeholder="输入您的API密钥"
                   placeholderTextColor={theme.colors.text + '50'}
-                  value={apiKey}
-                  onChangeText={setApiKey}
+                  value={configApiKey}
+                  onChangeText={setConfigApiKey}
                   secureTextEntry
                 />
               </View>
               
               {/* 端点 */}
-              <View style={styles.formItem}>
-                <Text style={[styles.formLabel, { color: theme.colors.text }]}>API端点</Text>
+              <View style={styles.formGroup}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>
+                  API端点URL
+                </Text>
                 <TextInput
                   style={[
-                    styles.formInput,
+                    styles.input,
                     { 
-                      color: theme.colors.text,
                       backgroundColor: theme.colors.background,
-                      borderColor: theme.colors.border
+                      color: theme.colors.text
                     }
                   ]}
-                  placeholder="例如：https://api.openai.com/v1/chat/completions"
+                  placeholder="API端点URL"
                   placeholderTextColor={theme.colors.text + '50'}
-                  value={endpoint}
-                  onChangeText={setEndpoint}
-                  autoCapitalize="none"
+                  value={configEndpoint}
+                  onChangeText={setConfigEndpoint}
                 />
               </View>
               
               {/* 模型 */}
-              <View style={styles.formItem}>
-                <Text style={[styles.formLabel, { color: theme.colors.text }]}>模型</Text>
-                <TextInput
+              <View style={styles.formGroup}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>
+                  模型
+                </Text>
+                <View style={styles.modelInputContainer}>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      { 
+                        backgroundColor: theme.colors.inputBackground || theme.colors.background,
+                        color: theme.colors.text,
+                        flex: 1
+                      }
+                    ]}
+                    placeholder="例如：gpt-3.5-turbo"
+                    placeholderTextColor="#999"
+                    value={configModel}
+                    onChangeText={setConfigModel}
+                  />
+                  <TouchableOpacity 
+                    style={[
+                      styles.getModelsButton, 
+                      { 
+                        backgroundColor: theme.colors.primary,
+                        paddingHorizontal: 16,
+                        paddingVertical: 12,
+                        marginLeft: 12
+                      }
+                    ]}
+                    onPress={() => {
+                      if (configProvider) {
+                        navigation.navigate('ModelSelector', {
+                          provider: configProvider,
+                          onSelectModel: (model: string) => {
+                            setConfigModel(model);
+                          }
+                        });
+                      } else {
+                        Alert.alert('错误', '请先选择API提供商');
+                      }
+                    }}
+                  >
+                    <Text style={[styles.getModelsButtonText, { fontSize: 16 }]}>获取模型</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              {/* 活跃状态 */}
+              <View style={styles.formGroup}>
+                <View style={styles.switchContainer}>
+                  <Text style={[styles.label, { color: theme.colors.text }]}>
+                    设为活跃配置
+                  </Text>
+                  <Switch
+                    value={configIsActive}
+                    onValueChange={setConfigIsActive}
+                    trackColor={{ false: '#767577', true: theme.colors.primary + '80' }}
+                    thumbColor={configIsActive ? theme.colors.primary : '#f4f3f4'}
+                  />
+                </View>
+                <Text style={[styles.helperText, { color: theme.colors.text + '70' }]}>
+                  活跃配置将用于所有AI请求
+                </Text>
+              </View>
+              
+              {/* 按钮组 */}
+              <View style={styles.buttonGroup}>
+                <TouchableOpacity
                   style={[
-                    styles.formInput,
+                    styles.button,
+                    styles.cancelButton,
                     { 
-                      color: theme.colors.text,
                       backgroundColor: theme.colors.background,
                       borderColor: theme.colors.border
                     }
                   ]}
-                  placeholder="例如：gpt-4 或 claude-3-opus-20240229"
-                  placeholderTextColor={theme.colors.text + '50'}
-                  value={model}
-                  onChangeText={setModel}
-                />
-              </View>
-              
-              {/* 是否活跃 */}
-              <View style={styles.switchItem}>
-                <Text style={[styles.formLabel, { color: theme.colors.text }]}>设为活跃API</Text>
-                <Switch
-                  value={isActive}
-                  onValueChange={setIsActive}
-                  trackColor={{ false: '#767577', true: theme.colors.primary + '80' }}
-                  thumbColor={isActive ? theme.colors.primary : '#f4f3f4'}
-                />
-              </View>
-            </View>
-            
-            {/* 操作按钮 */}
-            <View style={styles.formActions}>
-              {editMode && (
-                <TouchableOpacity
-                  style={[styles.cancelButton, { backgroundColor: theme.colors.card }]}
                   onPress={resetForm}
+                  disabled={loading}
                 >
-                  <Text style={[styles.cancelButtonText, { color: theme.colors.text }]}>取消</Text>
+                  <Text style={{ color: theme.colors.text }}>
+                    {isEditing ? '取消' : '重置'}
+                  </Text>
                 </TouchableOpacity>
-              )}
-              
-              <TouchableOpacity
-                style={[
-                  styles.saveButton, 
-                  { 
-                    backgroundColor: theme.colors.primary,
-                    opacity: loading ? 0.7 : 1
-                  }
-                ]}
-                onPress={saveConfig}
-                disabled={loading}
-              >
-                <Text style={styles.saveButtonText}>
-                  {loading ? '保存中...' : (editMode ? '更新' : '保存')}
-                </Text>
-              </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.saveButton,
+                    { 
+                      backgroundColor: theme.colors.primary,
+                      opacity: loading ? 0.7 : 1
+                    }
+                  ]}
+                  onPress={saveConfig}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Text style={styles.saveButtonText}>
+                      {isEditing ? '更新' : '保存'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
           
-          {/* 说明信息 */}
+          {/* 帮助信息 */}
           <View style={styles.section}>
-            <View style={[styles.infoCard, { backgroundColor: theme.colors.card }]}>
-              <Text style={[styles.infoTitle, { color: theme.colors.text }]}>支持的API</Text>
-              <Text style={[styles.infoText, { color: theme.colors.text + '99' }]}>
-                本应用支持多种AI服务提供商的API，包括：
+            <View style={[styles.infoContainer, { backgroundColor: theme.colors.card }]}>
+              <Text style={[styles.infoTitle, { color: theme.colors.text }]}>
+                支持的API说明
+              </Text>
+              <Text style={[styles.infoContent, { color: theme.colors.text + '99' }]}>
+                本应用支持以下AI服务提供商:
               </Text>
               <View style={styles.infoList}>
-                <Text style={[styles.infoListItem, { color: theme.colors.text + '99' }]}>• OpenAI (GPT-3.5, GPT-4)</Text>
-                <Text style={[styles.infoListItem, { color: theme.colors.text + '99' }]}>• Anthropic (Claude)</Text>
-                <Text style={[styles.infoListItem, { color: theme.colors.text + '99' }]}>• Google (Gemini)</Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>OpenAI</Text>: 原生OpenAI API
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>Azure OpenAI</Text>: 微软Azure上的OpenAI服务
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>Together AI</Text>: 与OpenAI API完全兼容
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>LocalAI</Text>: 本地运行的兼容OpenAI的API
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>Hugging Face</Text>: TGI服务，兼容OpenAI API格式
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>Anthropic</Text>: Claude模型，部分兼容OpenAI API
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>Google Gemini</Text>: Google提供的AI服务
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>DeepSeek AI</Text>: DeepSeek-V3模型，兼容OpenAI API
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>阿里云通义千问</Text>: 阿里云提供的大语言模型
+                </Text>
+                <Text style={[styles.infoItem, { color: theme.colors.text + '90' }]}>
+                  • <Text style={{ fontWeight: 'bold' }}>自定义OpenAI兼容</Text>: 使用自定义的兼容OpenAI的API
+                </Text>
               </View>
-              <Text style={[styles.infoText, { color: theme.colors.text + '99' }]}>
-                请确保您拥有正确的API密钥并使用相应的端点URL。
+              <Text style={[styles.infoNote, { color: theme.colors.text + '80' }]}>
+                提示: 长按配置项可以删除。点击配置项可以编辑。
               </Text>
             </View>
           </View>
+          
+          {/* 底部间距 */}
+          <View style={styles.bottomPadding} />
         </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </>
   );
 };
 
@@ -385,138 +643,238 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  keyboardAvoidingView: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
+  statusBarSpacer: {
+    height: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 15,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  backButton: {
+    padding: 8,
+  },
+  backButtonText: {
+    fontSize: 24,
     fontWeight: 'bold',
   },
-  headerButton: {
-    fontSize: 16,
+  headerRight: {
+    width: 32,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollViewContent: {
+    paddingBottom: 30,
+  },
+  bottomPadding: {
+    height: 50,
   },
   section: {
     marginBottom: 20,
-    paddingHorizontal: 15,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: 'bold',
+    marginHorizontal: 20,
     marginBottom: 10,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginLeft: 10,
+  },
+  emptyContainer: {
+    marginHorizontal: 20,
+    padding: 30,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  emptyDescription: {
+    fontSize: 14,
+    textAlign: 'center',
   },
   configItem: {
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 10,
+    marginHorizontal: 20,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
-  configInfo: {
-    marginBottom: 10,
+  configItemContent: {
+    padding: 15,
+  },
+  configHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   configName: {
     fontSize: 16,
     fontWeight: '500',
-    marginBottom: 5,
+  },
+  activeTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  activeTagText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  configProvider: {
+    fontSize: 14,
+    marginBottom: 4,
   },
   configModel: {
     fontSize: 14,
-    marginBottom: 5,
+    marginBottom: 4,
   },
-  configEndpoint: {
-    fontSize: 12,
-  },
-  configActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  editButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    marginRight: 8,
-  },
-  deleteButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-  },
-  buttonText: {
+  configApiKey: {
     fontSize: 14,
   },
-  formCard: {
-    padding: 15,
-    borderRadius: 8,
+  setActiveButton: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
   },
-  formItem: {
+  formContainer: {
+    marginHorizontal: 20,
+    padding: 15,
+    borderRadius: 12,
+  },
+  formGroup: {
     marginBottom: 15,
   },
-  formLabel: {
+  label: {
     fontSize: 14,
+    fontWeight: '500',
     marginBottom: 8,
   },
-  formInput: {
-    height: 40,
-    borderWidth: 1,
+  input: {
+    padding: 10,
     borderRadius: 8,
-    paddingHorizontal: 10,
+    fontSize: 16,
   },
-  switchItem: {
+  switchContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
   },
-  formActions: {
+  helperText: {
+    fontSize: 14,
+  },
+  buttonGroup: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 15,
+    justifyContent: 'space-between',
+    marginTop: 10,
   },
-  cancelButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-    marginRight: 10,
-  },
-  cancelButtonText: {
-    fontSize: 16,
-  },
-  saveButton: {
-    paddingVertical: 10,
+  button: {
+    paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 8,
+    minWidth: '45%',
+    alignItems: 'center',
+  },
+  cancelButton: {
+    borderWidth: 1,
+  },
+  saveButton: {
   },
   saveButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
     fontWeight: '500',
   },
-  infoCard: {
+  infoContainer: {
+    marginHorizontal: 20,
     padding: 15,
-    borderRadius: 8,
+    borderRadius: 12,
+    marginBottom: 30,
   },
   infoTitle: {
     fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 8,
+    fontWeight: 'bold',
+    marginBottom: 10,
   },
-  infoText: {
+  infoContent: {
     fontSize: 14,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   infoList: {
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  infoListItem: {
+  infoItem: {
     fontSize: 14,
-    marginBottom: 4,
+    marginBottom: 6,
+    lineHeight: 20,
+  },
+  infoNote: {
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  providerSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  providerDropdownContainer: {
+    position: 'absolute',
+    top: 70,
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 8,
+    maxHeight: 250,
+    zIndex: 1000,
+    overflow: 'hidden',
+  },
+  providerDropdown: {
+    width: '100%',
+    maxHeight: 250,
+  },
+  providerItem: {
+    padding: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  providerLabel: {
+    fontSize: 14,
+  },
+  modelInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  getModelsButton: {
+    marginLeft: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  getModelsButtonText: {
+    color: 'white',
+    fontWeight: '500',
+    fontSize: 14,
   },
 });
 

@@ -1,56 +1,40 @@
 import React from 'react';
-import { SafeAreaView, StatusBar, StyleSheet } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { StatusBar, Platform } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Provider } from 'react-redux';
+import { PersistGate } from 'redux-persist/integration/react';
+import { store, persistor } from './src/store';
+import AppNavigator from './src/navigation';
+import ErrorBoundary from './src/components/ErrorBoundary';
+import { ThemeProvider } from './src/presentation/theme/ThemeContext';
 
-import { ThemeProvider, useTheme } from './src/presentation/theme/ThemeContext';
-import DefaultScreen from './src/presentation/screens/DefaultScreen';
-import ChatScreen from './src/presentation/screens/ChatScreen';
-import SettingsScreen from './src/presentation/screens/SettingsScreen';
-
-// 创建导航堆栈
-const Stack = createNativeStackNavigator();
-
-// 主应用导航组件
-const AppNavigator = () => {
-  const { theme } = useTheme();
-  
-  return (
-    <NavigationContainer>
-      <StatusBar
-        barStyle={theme.colors.text === '#FFFFFF' ? 'light-content' : 'dark-content'}
-        backgroundColor={theme.colors.background}
-      />
-      <Stack.Navigator
-        initialRouteName="Default"
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.colors.background }
-        }}
-      >
-        <Stack.Screen name="Default" component={DefaultScreen} />
-        <Stack.Screen name="Chat" component={ChatScreen} />
-        <Stack.Screen name="Settings" component={SettingsScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
-};
-
-// 主应用组件
+/**
+ * 应用主入口组件
+ * 
+ * @returns 应用主组件
+ */
 const App = () => {
   return (
-    <SafeAreaView style={styles.container}>
-      <ThemeProvider>
-        <AppNavigator />
-      </ThemeProvider>
-    </SafeAreaView>
+    <ErrorBoundary>
+      <Provider store={store}>
+        <PersistGate loading={null} persistor={persistor}>
+          <ThemeProvider>
+            <SafeAreaProvider>
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <StatusBar 
+                  barStyle="dark-content" 
+                  backgroundColor="transparent"
+                  translucent={Platform.OS === 'android'}
+                />
+                <AppNavigator />
+              </GestureHandlerRootView>
+            </SafeAreaProvider>
+          </ThemeProvider>
+        </PersistGate>
+      </Provider>
+    </ErrorBoundary>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-});
 
 export default App; 

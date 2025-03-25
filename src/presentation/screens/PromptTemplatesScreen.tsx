@@ -10,11 +10,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  SafeAreaView
+  SafeAreaView,
+  StatusBar,
+  ActivityIndicator
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { getPromptTemplates, savePromptTemplate, deletePromptTemplate } from '../../utils/storageService';
-import { PromptTemplate } from '../../utils/storageService';
+import { PromptTemplate } from '../../types/state';
+import { useTranslation } from '../../i18n';
 
 /**
  * 提示词模板界面
@@ -22,9 +25,16 @@ import { PromptTemplate } from '../../utils/storageService';
  */
 const PromptTemplatesScreen = ({ navigation }: any) => {
   const { theme } = useTheme();
+  const { t } = useTranslation();
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [editMode, setEditMode] = useState(false);
   const [currentTemplate, setCurrentTemplate] = useState<PromptTemplate | null>(null);
+  
+  // 安全获取翻译文本，避免对象错误
+  const safeTranslate = (key: string, fallback: string): string => {
+    const result = t(key);
+    return typeof result === 'string' ? result : fallback;
+  };
   
   // 表单状态
   const [name, setName] = useState('');
@@ -83,8 +93,9 @@ const PromptTemplatesScreen = ({ navigation }: any) => {
 
       const newTemplate: PromptTemplate = {
         id: currentTemplate?.id || Date.now().toString(),
-        name,
-        content,
+        name: name.trim(),
+        content: content.trimEnd(),
+        systemPrompt: '',
         createdAt: currentTemplate?.createdAt || Date.now(),
         updatedAt: Date.now()
       };
@@ -138,7 +149,13 @@ const PromptTemplatesScreen = ({ navigation }: any) => {
 
   // 使用提示词模板
   const useTemplate = (template: PromptTemplate) => {
-    navigation.navigate('Chat', { promptTemplate: template });
+    // 返回到主页并将提示词填充到输入框
+    console.log('使用模板:', template.name, '内容:', template.content);
+    // 清理内容中的特殊字符，确保内容可以正常传递，并去除末尾空白
+    const content = template.content.replace(/\n/g, ' ').trimEnd();
+    navigation.navigate('Home', { 
+      templateContent: content
+    });
   };
 
   // 渲染模板项
@@ -199,154 +216,166 @@ const PromptTemplatesScreen = ({ navigation }: any) => {
 
   // 添加示例模板
   const addExampleTemplate = (example: { name: string, content: string }) => {
-    setName(example.name);
-    setContent(example.content);
+    setName(example.name.trim());
+    setContent(example.content.trimEnd());
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoidingView}
-      >
-        {/* 头部 */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={[styles.headerButton, { color: theme.colors.primary }]}>返回</Text>
-          </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>提示词模板</Text>
-          <View style={{ width: 50 }} />
-        </View>
-
-        <ScrollView style={styles.scrollView}>
-          {/* 现有模板列表 */}
-          {templates.length > 0 && (
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>已有模板</Text>
-              <FlatList
-                data={templates}
-                renderItem={renderTemplateItem}
-                keyExtractor={(item) => item.id}
-                scrollEnabled={false}
-              />
-            </View>
-          )}
-
-          {/* 添加/编辑表单 */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              {editMode ? '编辑模板' : '添加新模板'}
+    <>
+      <StatusBar
+        barStyle={theme.isDark ? "light-content" : "dark-content"}
+        backgroundColor="transparent"
+        translucent
+      />
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={styles.statusBarSpacer} />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardAvoidingView}
+        >
+          {/* 头部 */}
+          <View style={[styles.header, { backgroundColor: theme.colors.background }]}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Text style={[styles.backButtonText, { color: theme.colors.primary }]}>
+                ←
+              </Text>
+            </TouchableOpacity>
+            <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+              {safeTranslate('promptTemplates', '提示词模板')}
             </Text>
-            
-            <View style={[styles.formCard, { backgroundColor: theme.colors.card }]}>
-              {/* 名称 */}
-              <View style={styles.formItem}>
-                <Text style={[styles.formLabel, { color: theme.colors.text }]}>名称</Text>
-                <TextInput
-                  style={[
-                    styles.formInput,
-                    { 
-                      color: theme.colors.text,
-                      backgroundColor: theme.colors.background,
-                      borderColor: theme.colors.border
-                    }
-                  ]}
-                  placeholder="输入提示词模板名称"
-                  placeholderTextColor={theme.colors.text + '50'}
-                  value={name}
-                  onChangeText={setName}
-                />
-              </View>
-              
-              {/* 内容 */}
-              <View style={styles.formItem}>
-                <Text style={[styles.formLabel, { color: theme.colors.text }]}>内容</Text>
-                <TextInput
-                  style={[
-                    styles.formTextarea,
-                    { 
-                      color: theme.colors.text,
-                      backgroundColor: theme.colors.background,
-                      borderColor: theme.colors.border
-                    }
-                  ]}
-                  placeholder="输入提示词模板内容"
-                  placeholderTextColor={theme.colors.text + '50'}
-                  value={content}
-                  onChangeText={setContent}
-                  multiline
-                  numberOfLines={6}
-                  textAlignVertical="top"
-                />
-              </View>
-            </View>
-            
-            {/* 操作按钮 */}
-            <View style={styles.formActions}>
-              {editMode && (
-                <TouchableOpacity
-                  style={[styles.cancelButton, { backgroundColor: theme.colors.card }]}
-                  onPress={resetForm}
-                >
-                  <Text style={[styles.cancelButtonText, { color: theme.colors.text }]}>取消</Text>
-                </TouchableOpacity>
-              )}
-              
-              <TouchableOpacity
-                style={[
-                  styles.saveButton, 
-                  { 
-                    backgroundColor: theme.colors.primary,
-                    opacity: loading ? 0.7 : 1
-                  }
-                ]}
-                onPress={saveTemplate}
-                disabled={loading}
-              >
-                <Text style={styles.saveButtonText}>
-                  {loading ? '保存中...' : (editMode ? '更新' : '保存')}
-                </Text>
-              </TouchableOpacity>
-            </View>
+            <View style={styles.headerRight} />
           </View>
-          
-          {/* 示例模板 */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>示例模板</Text>
-            <View style={[styles.examplesCard, { backgroundColor: theme.colors.card }]}>
-              <Text style={[styles.examplesInfo, { color: theme.colors.text + '99' }]}>
-                点击以下示例模板快速添加常用提示词
+
+          <ScrollView style={styles.scrollView}>
+            {/* 现有模板列表 */}
+            {templates.length > 0 && (
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>已有模板</Text>
+                <FlatList
+                  data={templates}
+                  renderItem={renderTemplateItem}
+                  keyExtractor={(item) => item.id}
+                  scrollEnabled={false}
+                />
+              </View>
+            )}
+
+            {/* 添加/编辑表单 */}
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+                {editMode ? '编辑模板' : '添加新模板'}
               </Text>
               
-              <View style={styles.examplesList}>
-                {exampleTemplates.map((example, index) => (
+              <View style={[styles.formCard, { backgroundColor: theme.colors.card }]}>
+                {/* 名称 */}
+                <View style={styles.formItem}>
+                  <Text style={[styles.formLabel, { color: theme.colors.text }]}>名称</Text>
+                  <TextInput
+                    style={[
+                      styles.formInput,
+                      { 
+                        color: theme.colors.text,
+                        backgroundColor: theme.colors.background,
+                        borderColor: theme.colors.border
+                      }
+                    ]}
+                    placeholder="输入提示词模板名称"
+                    placeholderTextColor={theme.colors.text + '50'}
+                    value={name}
+                    onChangeText={setName}
+                  />
+                </View>
+                
+                {/* 内容 */}
+                <View style={styles.formItem}>
+                  <Text style={[styles.formLabel, { color: theme.colors.text }]}>内容</Text>
+                  <TextInput
+                    style={[
+                      styles.formTextarea,
+                      { 
+                        color: theme.colors.text,
+                        backgroundColor: theme.colors.background,
+                        borderColor: theme.colors.border
+                      }
+                    ]}
+                    placeholder="输入提示词模板内容"
+                    placeholderTextColor={theme.colors.text + '50'}
+                    value={content}
+                    onChangeText={setContent}
+                    multiline
+                    numberOfLines={6}
+                    textAlignVertical="top"
+                  />
+                </View>
+              </View>
+              
+              {/* 操作按钮 */}
+              <View style={styles.formActions}>
+                {editMode && (
                   <TouchableOpacity
-                    key={index}
-                    style={[styles.exampleItem, { borderColor: theme.colors.border }]}
-                    onPress={() => addExampleTemplate(example)}
+                    style={[styles.cancelButton, { backgroundColor: theme.colors.card }]}
+                    onPress={resetForm}
                   >
-                    <Text style={[styles.exampleName, { color: theme.colors.text }]}>
-                      {example.name}
-                    </Text>
+                    <Text style={[styles.cancelButtonText, { color: theme.colors.text }]}>取消</Text>
                   </TouchableOpacity>
-                ))}
+                )}
+                
+                <TouchableOpacity
+                  style={[
+                    styles.saveButton, 
+                    { 
+                      backgroundColor: theme.colors.primary,
+                      opacity: loading ? 0.7 : 1
+                    }
+                  ]}
+                  onPress={saveTemplate}
+                  disabled={loading}
+                >
+                  <Text style={styles.saveButtonText}>
+                    {loading ? '保存中...' : (editMode ? '更新' : '保存')}
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
-          </View>
-          
-          {/* 说明 */}
-          <View style={styles.section}>
-            <View style={[styles.infoCard, { backgroundColor: theme.colors.card }]}>
-              <Text style={[styles.infoTitle, { color: theme.colors.text }]}>什么是提示词模板？</Text>
-              <Text style={[styles.infoText, { color: theme.colors.text + '99' }]}>
-                提示词模板是预设好的AI指令，可以帮助您更快地获得想要的回答。
-                使用良好的提示词模板可以大大提高AI回答的质量和相关性。
-              </Text>
+            
+            {/* 示例模板 */}
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>示例模板</Text>
+              <View style={[styles.examplesCard, { backgroundColor: theme.colors.card }]}>
+                <Text style={[styles.examplesInfo, { color: theme.colors.text + '99' }]}>
+                  点击以下示例模板快速添加常用提示词
+                </Text>
+                
+                <View style={styles.examplesList}>
+                  {exampleTemplates.map((example, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[styles.exampleItem, { borderColor: theme.colors.border }]}
+                      onPress={() => addExampleTemplate(example)}
+                    >
+                      <Text style={[styles.exampleName, { color: theme.colors.text }]}>
+                        {example.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
             </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+            
+            {/* 说明 */}
+            <View style={styles.section}>
+              <View style={[styles.infoCard, { backgroundColor: theme.colors.card }]}>
+                <Text style={[styles.infoTitle, { color: theme.colors.text }]}>什么是提示词模板？</Text>
+                <Text style={[styles.infoText, { color: theme.colors.text + '99' }]}>
+                  提示词模板是预设好的AI指令，可以帮助您更快地获得想要的回答。
+                  使用良好的提示词模板可以大大提高AI回答的质量和相关性。
+                </Text>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </>
   );
 };
 
@@ -354,24 +383,37 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  keyboardAvoidingView: {
-    flex: 1,
+  statusBarSpacer: {
+    height: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  scrollView: {
+  keyboardAvoidingView: {
     flex: 1,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 15,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  backButton: {
+    padding: 8,
+  },
+  backButtonText: {
+    fontSize: 24,
     fontWeight: 'bold',
   },
-  headerButton: {
-    fontSize: 16,
+  headerRight: {
+    width: 32,
+  },
+  scrollView: {
+    flex: 1,
   },
   section: {
     marginBottom: 20,

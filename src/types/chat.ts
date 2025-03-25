@@ -76,4 +76,33 @@ export enum ChatSortOption {
   DATE_UPDATED_ASC = 'dateUpdatedAsc',
   ALPHABETICAL = 'alphabetical',
   MESSAGE_COUNT_DESC = 'messageCountDesc'
-} 
+}
+
+export type MessageRole = 'user' | 'assistant' | 'system';
+
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+  modelId?: string;
+}
+
+export interface ChatState {
+  conversations: Conversation[];
+  currentConversationId: string | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface ChatContextType {
+  state: ChatState;
+  sendMessage: (content: string) => Promise<void>;
+  createNewConversation: () => void;
+  switchConversation: (conversationId: string) => void;
+  deleteConversation: (conversationId: string) => void;
+  clearConversations: () => void;
+}
+
+export default ChatContextType; 

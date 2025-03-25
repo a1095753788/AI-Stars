@@ -1,66 +1,46 @@
 // Redux Store配置
 // 注意：实际使用需导入 @reduxjs/toolkit
-import { RootState } from '../types/state';
-import { chatReducer } from './chatSlice';
-import { apiConfigReducer } from './apiSlice';
-import { settingsReducer } from './settingsSlice';
+import { configureStore } from '@reduxjs/toolkit';
+import { persistStore, persistReducer, FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER } from 'redux-persist';
+import { combineReducers } from 'redux';
+import { storage } from '../utils/storage';
+import { createMMKVStorage } from '../utils/mmkv-storage';
 
-// 创建根减速器
-const rootReducer = {
+import chatReducer from './slices/chatSlice';
+import settingsReducer from './slices/settingsSlice';
+
+// 创建MMKV存储引擎
+const mmkvStorage = createMMKVStorage({ storage });
+
+// 持久化配置
+const persistConfig = {
+  key: 'root',
+  storage: mmkvStorage,
+  whitelist: ['settings', 'chat'], // 只持久化这些reducer的状态
+};
+
+// 合并所有reducers
+const rootReducer = combineReducers({
   chat: chatReducer,
-  api: apiConfigReducer,
-  settings: settingsReducer
-};
+  settings: settingsReducer,
+});
 
-// 配置store
-export const configureStore = () => {
-  // 实际使用Redux Toolkit时的代码
-  // return configureReduxStore({
-  //   reducer: rootReducer,
-  //   middleware: (getDefaultMiddleware) => getDefaultMiddleware({
-  //     serializableCheck: false
-  //   })
-  // });
-  
-  // 模拟store，仅用于结构说明
-  return {
-    getState: () => {
-      const initialState: RootState = {
-        chat: {
-          chats: {},
-          currentChatId: null,
-          loading: false,
-          error: null
-        },
-        api: {
-          configs: [],
-          activeConfigId: null,
-          loading: false,
-          error: null
-        },
-        settings: {
-          themeMode: 'light',
-          useSystemTheme: true,
-          allowMultipleFiles: false,
-          enableVoice: true,
-          promptTemplates: []
-        }
-      };
-      
-      return initialState;
-    },
-    dispatch: (action: any) => {
-      console.log('Dispatching action:', action);
-      return action;
-    },
-    subscribe: (listener: () => void) => {
-      return () => {}; // 返回取消订阅函数
-    }
-  };
-};
+// 创建持久化reducer
+const persistedReducer = persistReducer(persistConfig, rootReducer);
 
-// 创建store实例
-export const store = configureStore();
+// 创建store
+export const store = configureStore({
+  reducer: persistedReducer,
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      serializableCheck: {
+        ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+      },
+    }),
+});
 
-// 获取类型
+// 创建持久化store
+export const persistor = persistStore(store);
+
+export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch; 

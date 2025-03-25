@@ -3,6 +3,13 @@
  * 提供文件选择、文件类型识别和文件显示功能
  */
 
+import { Platform, PermissionsAndroid } from 'react-native';
+import DocumentPicker, { 
+  DocumentPickerResponse,
+  types 
+} from 'react-native-document-picker';
+import RNFS from 'react-native-fs';
+
 // 文件信息接口
 export interface FileInfo {
   uri: string;
@@ -28,29 +35,159 @@ export enum FileType {
 }
 
 /**
- * 从设备选择文件
- * @returns 文件信息数组，如果用户取消则返回空数组
+ * 请求存储权限（仅Android需要）
  */
-export const selectFile = async (): Promise<FileInfo[]> => {
-  // 实际应用中，这里应该调用文件选择API
-  // 例如：使用react-native-document-picker
+const requestStoragePermission = async (): Promise<boolean> => {
+  if (Platform.OS !== 'android') {
+    return true;
+  }
+  
+  try {
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+      {
+        title: '存储权限',
+        message: '应用需要访问您的文件以进行上传。',
+        buttonNeutral: '稍后询问',
+        buttonNegative: '取消',
+        buttonPositive: '确定',
+      }
+    );
+    
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  } catch (err) {
+    console.error('请求存储权限时出错:', err);
+    return false;
+  }
+};
 
-  // 模拟实现，返回一个假的文件信息
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      // 模拟用户选择文件
-      const mockFileInfo: FileInfo = {
-        uri: 'file://mock-document.pdf',
-        name: 'mock-document.pdf',
-        size: 1024 * 1024 * 1.2, // 1.2MB
-        type: 'application/pdf'
-      };
-      
-      resolve([mockFileInfo]);
-      
-      // 如果要模拟用户取消，则返回：resolve([]);
-    }, 500);
-  });
+/**
+ * 选择文件
+ * @returns 返回文件信息或null（如果用户取消）
+ */
+export const selectFile = async (): Promise<DocumentPickerResponse[] | null> => {
+  // 检查权限
+  if (Platform.OS === 'android') {
+    const hasPermission = await requestStoragePermission();
+    if (!hasPermission) {
+      throw new Error('没有存储权限');
+    }
+  }
+  
+  try {
+    const results = await DocumentPicker.pick({
+      type: [
+        types.doc,
+        types.docx,
+        types.pdf,
+        types.plainText,
+        types.xls,
+        types.xlsx,
+        types.ppt,
+        types.pptx,
+        types.zip,
+        types.images,
+        types.video,
+        types.audio,
+      ],
+      allowMultiSelection: false,
+    });
+    
+    return results;
+  } catch (err) {
+    if (DocumentPicker.isCancel(err)) {
+      return null;
+    }
+    throw err;
+  }
+};
+
+/**
+ * 获取文件扩展名
+ */
+export const getFileExtension = (fileName: string): string => {
+  return fileName.split('.').pop()?.toLowerCase() || '';
+};
+
+/**
+ * 获取文件MIME类型
+ */
+export const getFileMimeType = (fileName: string): string => {
+  const extension = getFileExtension(fileName);
+  
+  switch (extension) {
+    case 'pdf':
+      return 'application/pdf';
+    case 'doc':
+    case 'docx':
+      return 'application/msword';
+    case 'xls':
+    case 'xlsx':
+      return 'application/vnd.ms-excel';
+    case 'ppt':
+    case 'pptx':
+      return 'application/vnd.ms-powerpoint';
+    case 'txt':
+      return 'text/plain';
+    case 'zip':
+      return 'application/zip';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'gif':
+      return 'image/gif';
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'mp4':
+      return 'video/mp4';
+    default:
+      return 'application/octet-stream';
+  }
+};
+
+/**
+ * 格式化文件大小
+ */
+export const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+};
+
+/**
+ * 读取文件内容
+ */
+export const readFileContent = async (filePath: string): Promise<string> => {
+  try {
+    return await RNFS.readFile(filePath, 'utf8');
+  } catch (error) {
+    console.error('读取文件内容时出错:', error);
+    throw new Error('无法读取文件内容');
+  }
+};
+
+/**
+ * 检查文件是否存在
+ */
+export const checkFileExists = async (filePath: string): Promise<boolean> => {
+  try {
+    return await RNFS.exists(filePath);
+  } catch (error) {
+    console.error('检查文件是否存在时出错:', error);
+    return false;
+  }
 };
 
 /**
@@ -143,16 +280,37 @@ export const getFileDisplayName = (fileName: string, maxLength: number = 20): st
 };
 
 /**
- * 格式化文件大小为人类可读格式
- * @param bytes 文件大小（字节）
- * @returns 格式化后的大小字符串
+ * 将文件转换为Base64格式
+ * @param uri 文件URI
+ * @returns Base64字符串，如果转换失败则返回null
  */
-export const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
-  
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+export const fileToBase64 = async (uri: string): Promise<string | null> => {
+  try {
+    // 处理file:// URI前缀
+    const filePath = uri.startsWith('file://') ? uri.slice(7) : uri;
+    
+    // 检查文件是否存在
+    const exists = await RNFS.exists(filePath);
+    if (!exists) {
+      console.error('文件不存在:', filePath);
+      return null;
+    }
+    
+    // 读取文件内容并转换为base64
+    const base64Data = await RNFS.readFile(filePath, 'base64');
+    if (!base64Data) {
+      console.error('读取文件失败');
+      return null;
+    }
+    
+    // 获取文件MIME类型
+    const fileName = filePath.split('/').pop() || '';
+    const mimeType = getFileMimeType(fileName);
+    
+    // 返回带有MIME类型的完整base64字符串
+    return `data:${mimeType};base64,${base64Data}`;
+  } catch (error) {
+    console.error('转换文件到Base64失败:', error);
+    return null;
+  }
 }; 

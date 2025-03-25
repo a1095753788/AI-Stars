@@ -1,5 +1,4 @@
 {
-  "extends": "@react-native/typescript-config/tsconfig.json",
   "compilerOptions": {
     "target": "esnext",
     "module": "esnext",
@@ -17,8 +16,16 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "*": ["src/*"]
-    }
+      "*": ["src/*"],
+      "@/*": ["src/*"],
+      "./mediaUtils": ["src/utils/mediaUtils"],
+      "./providers/*": ["src/utils/providers/*"]
+    },
+    "typeRoots": [
+      "./node_modules/@types",
+      "./src/types"
+    ],
+    "types": []
   },
   "exclude": [
     "node_modules",
@@ -27,6 +34,7 @@
     "jest.config.js"
   ],
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "src/types/declarations.d.ts"
   ]
 } 

@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.aisimple.app-mergeDebugResources-34:/values-v18/values-v18.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\alune\\.gradle\\caches\\transforms-3\\c7f9391720888c1fd22b4f8fd0a073c0\\transformed\\appcompat-1.6.1\\res\\values-v18\\values-v18.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "48",
+                        "endOffsets": "99"
+                    }
+                }
+            ]
+        }
+    ]
+}
